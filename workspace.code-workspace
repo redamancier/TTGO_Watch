@@ -1,0 +1,22 @@
+{
+	"folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "files.associations": {
+            "array": "cpp",
+            "deque": "cpp",
+            "string": "cpp",
+            "unordered_map": "cpp",
+            "unordered_set": "cpp",
+            "vector": "cpp",
+            "initializer_list": "cpp",
+            "functional": "c",
+            "i2cdev.h": "c",
+            "wire.h": "c",
+            "i2c.h": "c"
+        }
+    }
+}
