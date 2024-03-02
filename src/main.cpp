@@ -1,234 +1,199 @@
-#include "lvgl.h"
-#include "TFT_eSPI.h"
+
+#include "MPU6050_tockn.h"
 #include "SPI.h"
-#include "display.h"
+#include "TFT_eSPI.h"
+#include "Wire.h"
+#include "all.h"
 #include "button.h"
-// #include "lv_examples/lv_examples.h"
-
+#include "display.h"
+#include "hand.h"
+#include "hand_port.h"
+#include "hand_user.h"
+#include "lvgl.h"
+#include "modular.h"
+// #include "lv_gui.h"
+#include "bmp.h"
+// #include "esp_adc_cal.h"
 /***Component objects***/
-
 Display screen;
 Button btn1(BUTTON_1);
 Button btn2(BUTTON_2);
+lv_my_ui lv_ui;
+MPU6050 mpu6050(Wire);
+hand_t hand_structure;
 
-/*some int */
+/*some int*/
 
-int vref = 1100;
 int btnClick = false;
+long timer = 0;
+uint8_t hand_feature_signal = PEACE;
+uint8_t hand_action_useful = 0;
+uint32_t targetTime;
+bool HandOnFlag = false;
+bool scr_palm = false;
+uint32_t scr_on_count = 0;
 
+float pitch, roll, yaw;
+int16_t pitch_raw, roll_raw, yaw_raw;
+float pitch_filter, roll_filter, yaw_filter;
 
-lv_obj_t * scr1 = lv_obj_create(NULL, NULL);
-lv_obj_t * scr2 = lv_obj_create(NULL, NULL);
-lv_obj_t * scr3 = lv_obj_create(NULL, NULL);
-lv_obj_t * scr4 = lv_obj_create(NULL, NULL);
+int16_t gyrox_raw, gyroy_raw, gyroz_raw;
+short gyrox, gyroy, gyroz;
 
+short accx, accy, accz;
 
+int16_t accx_raw, accy_raw, accz_raw;
+float accx_filter, accy_filter, accz_filter;
 
-float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
-float sdeg=0, mdeg=0, hdeg=0;
-uint16_t osx=64, osy=64, omx=64, omy=64, ohx=64, ohy=64;  // Saved H, M, S x & y coords
-uint16_t x0=0, x1=0, yy0=0, yy1=0;
-uint32_t targetTime = 0;                    // for next 1 second timeout
+uint8_t count_for_hand;
 
-static uint8_t conv2d(const char* p) {
-  uint8_t v = 0;
-  if ('0' <= *p && *p <= '9')
-    v = *p - '0';
-  return 10 * v + *++p - '0';
+static uint8_t conv2d(const char *p) {
+    uint8_t v = 0;
+    if ('0' <= *p && *p <= '9')
+        v = *p - '0';
+    return 10 * v + *++p - '0';
 }
 
-uint8_t hh=conv2d(__TIME__), mm=conv2d(__TIME__+3), ss=conv2d(__TIME__+6);  // Get H, M, S from compile time
-
-boolean initial = 1;
-
-lv_obj_t * obj_second = NULL;
-lv_obj_t * label_second = NULL;
-lv_obj_t * obj_minute = NULL;
-lv_obj_t * label_minute = NULL;
-lv_obj_t * obj_hour = NULL;
-lv_obj_t * label_hour = NULL;
-
-/*here is some functions of events*/
-void label_event_second_cb(lv_obj_t * label, lv_event_t event)
-{
-    if(event == LV_EVENT_REFRESH)
-    {
-        lv_label_set_text_fmt(label, "%d", ss);
-    }
-}
-
-void label_event_minute_cb(lv_obj_t * label, lv_event_t event)
-{
-    if(event == LV_EVENT_REFRESH)
-    {
-        lv_label_set_text_fmt(label, "%d", mm);
-    }
-}
-
-void label_event_hour_cb(lv_obj_t * label, lv_event_t event)
-{
-    if(event == LV_EVENT_REFRESH)
-    {
-        lv_label_set_text_fmt(label, "%d", hh);
-    }
-}
+uint8_t hh = conv2d(__TIME__), mm = conv2d(__TIME__ + 3),
+        ss = conv2d(__TIME__ + 6); // Get H, M, S from compile time
 
 /*some basic functions*/
-void button_init()
-{
-    btn1.setLongClickHandler([](Button & b)
-    {
-        btnClick = false;
-        int r = digitalRead(TFT_BL);
-        tft.fillScreen(TFT_BLACK);
-        tft.setTextColor(TFT_GREEN, TFT_BLACK);
-        tft.setTextDatum(MC_DATUM);
-        tft.drawString("Press again to wake up",  tft.width() / 2, tft.height() / 2 );
-        delay(6000);
-        digitalWrite(TFT_BL, !r);
+void button_init() {
 
-        tft.writecommand(TFT_DISPOFF);
-        tft.writecommand(TFT_SLPIN);
-        //After using light sleep, you need to disable timer wake, because here use external IO port to wake up
-        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
-        // esp_sleep_enable_ext1_wakeup(GPIO_SEL_35, ESP_EXT1_WAKEUP_ALL_LOW);
-        esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 0);
-        delay(200);
-        esp_deep_sleep_start();
+    btn1.setLongClickHandler([](Button &b) {
+        btnClick = false;
+        // lv_event_send_refresh(lv_ui.show_label);
+        // lv_scr_load(lv_ui.home);
     });
-    btn1.setPressedHandler([](Button & b) 
-    {
+    btn1.setPressedHandler([](Button &b) {
         /*add your event when the button was pressed*/
 
-
-        btnClick = true;
+        btnClick = false;
+        // lv_scr_load(lv_ui.scenes);
+        HandOnFlag = false;
     });
 
-    btn2.setPressedHandler([](Button & b)
-    {
+    btn2.setLongClickHandler([](Button &b) {
         btnClick = false;
-        /*add your event when the button2 was pressed*/
+    });
+
+    btn2.setPressedHandler([](Button &b) {
+        btnClick = false;
+        HandOnFlag = true;
+        hand_init_again();
+        lv_label_set_text(lv_ui.show_label, "#ff0000 PEACE#");
+        lv_scr_load(lv_ui.home);
     });
 }
 
-void button_loop()
-{
+void button_loop() {
     btn1.loop();
     btn2.loop();
 }
 
-
-
-
-
-void setup()
-{
-	Serial.begin(115200); /* prepare for possible serial debug */
-    
-    /***Init screen ***/
-    screen.init();
-    screen.setBackLight(0.2);
-    scr1 = lv_scr_act();
-
-    /***Init button***/
-    button_init();
-
-
-
-
-    lv_obj_t * label2 = lv_label_create(lv_scr_act(), NULL);
-    lv_label_set_text(label2, "Create By Alex");
-    lv_label_set_recolor(label2, true);
-    lv_obj_align(label2, NULL, LV_ALIGN_IN_BOTTOM_MID, 0, 0);
-
-    /*test : Create a button*/
-
-    static lv_style_t style_shadow;
-    lv_style_init(&style_shadow);
-    lv_style_set_shadow_width(&style_shadow, LV_STATE_DEFAULT, 8);
-    // lv_style_set_shadow_spread(&style_shadow, LV_STATE_DEFAULT, 5);
-    lv_style_set_shadow_color(&style_shadow, LV_STATE_DEFAULT, LV_COLOR_BLUE);
-
-    lv_obj_t * label3 = lv_label_create(lv_scr_act(), NULL);
-    // lv_label_set_text(label3, "WatchX");
-    lv_label_set_recolor(label3, true);
-    lv_obj_align(label3, NULL, LV_ALIGN_CENTER, 0, 0);
-
-    targetTime = millis() + 1000; 
-
-    obj_second = lv_obj_create(lv_scr_act(), NULL);
-    // lv_obj_add_style(obj_second, LV_OBJ_PART_MAIN, &style_shadow);
-    lv_obj_align(obj_second, NULL, LV_ALIGN_IN_RIGHT_MID, 39, 0);
-    lv_obj_set_size(obj_second, 40, 40);
-    
-    label_second = lv_label_create(obj_second, label3);
-    lv_label_set_text(label_second, "0");
-    lv_obj_align(label_second, obj_second, LV_ALIGN_CENTER, -3, 0);
-    lv_obj_set_event_cb(label_second, label_event_second_cb);
-
-
-    obj_minute = lv_obj_create(lv_scr_act(), NULL);
-    // lv_obj_add_style(obj_minute, LV_OBJ_PART_MAIN, &style_shadow);
-    lv_obj_set_size(obj_minute, 40, 40);
-    lv_obj_align(obj_minute, NULL, LV_ALIGN_CENTER, 0, 0);
-
-    label_minute = lv_label_create(obj_minute, label3);
-    lv_label_set_text(label_minute, "0");
-    lv_obj_align(label_minute, obj_minute, LV_ALIGN_CENTER, -3, 0);
-    lv_obj_set_event_cb(label_minute, label_event_minute_cb);
-    
- 
-    obj_hour = lv_obj_create(lv_scr_act(), NULL);
-    // lv_obj_add_style(obj_hour, LV_OBJ_PART_MAIN, &style_shadow);
-    lv_obj_set_size(obj_hour, 40, 40);
-    lv_obj_align(obj_hour, NULL, LV_ALIGN_IN_LEFT_MID, 2, 0);
-
-    label_hour = lv_label_create(obj_hour, label3);
-    lv_label_set_text(label_hour, "0");
-    lv_obj_align(label_hour, obj_hour, LV_ALIGN_CENTER, -3, 0);
-    lv_obj_set_event_cb(label_hour, label_event_hour_cb); 
-
-
-    static lv_style_t default_style;
-	lv_style_init(&default_style);
-	lv_style_set_bg_color(&default_style, LV_STATE_DEFAULT, LV_COLOR_BLACK);
-	lv_style_set_bg_color(&default_style, LV_STATE_PRESSED, LV_COLOR_GRAY);
-	lv_style_set_bg_color(&default_style, LV_STATE_FOCUSED, LV_COLOR_BLACK);
-	lv_style_set_bg_color(&default_style, LV_STATE_FOCUSED | LV_STATE_PRESSED, lv_color_hex(0xf88));
-
-	lv_obj_add_style(lv_scr_act(), LV_BTN_PART_MAIN, &default_style);
-
-	scr2 = lv_scr_act();
-
-
+void espDelay(int ms) {
+    esp_sleep_enable_timer_wakeup(ms * 1000);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+    esp_light_sleep_start();
 }
 
+void setup() {
+    /*Bluetooth init in setup*/
+    Serial.begin(115200); /* prepare for possible serial debug */
+    // tft.setRotation(1);
 
-void loop()
-{
+    // tft.setRotation(3);
+
+    /***Init screen ***/
+    screen.init();
+    espDelay(500);
+
+    /***Init button***/
+
+    /*init IMU*/
+    Wire.begin();
+    mpu6050.begin();
+
+    /*hand init*/
+    hand_init(&hand_structure);
+
+    /*init mudular as know as GUI objects initialize*/
+    setup_ui(&lv_ui);
+
+    tft.setRotation(1);
+    screen.setBackLight(0.2);
+    tft.pushImage(0, 0, 240, 135, ttgo);
+    // lv_screen_on_gui();
+    espDelay(5000);
+    tft.setRotation(0);
+
+    button_init();
+    mpu6050.calcGyroOffsets(true);
+    // lv_scr_load(lv_ui.scenes);
+    // lv_ui.scenes = lv_scr_act();
+}
+
+void loop() {
+
     if (targetTime < millis()) {
-        targetTime = millis()+1000;
-        ss++;              // Advance second
-        if (ss==60) {
-         ss=0;
-         mm++;            // Advance minute
-        if(mm>59) {
-            mm=0;
-            hh++;          // Advance hour
-            if (hh>23) {
-            hh=0;
+        targetTime = millis() + 1000;
+        ss++; // Advance second
+        if (ss == 60) {
+            ss = 0;
+            mm++; // Advance minute
+            if (mm > 59) {
+                mm = 0;
+                hh++; // Advance hour
+                if (hh > 23) {
+                    hh = 0;
                 }
             }
         }
     }
 
+    lv_event_send_refresh(lv_ui.label_second);
+    lv_event_send_refresh(lv_ui.label_minute);
+    lv_event_send_refresh(lv_ui.label_hour);
+
     screen.routine();
 
-    lv_event_send_refresh(label_second);
-    lv_event_send_refresh(label_minute);
-    lv_event_send_refresh(label_hour);
+    if (millis() - timer > 6) {
+
+        pitch = mpu6050.getAngleX();
+        roll = mpu6050.getAngleY();
+        yaw = mpu6050.getAngleZ();
+
+        gyrox = mpu6050.getGyroX();
+        gyroy = mpu6050.getGyroY();
+        gyroz = mpu6050.getGyroZ();
+
+        accx = mpu6050.getAccX();
+        accy = mpu6050.getAccY();
+        accz = mpu6050.getAccZ();
+
+        timer = millis();
+    }
+
+    mpu6050.update();
+
+    if (HandOnFlag == true) {
+        // hand_init_again();
+        hand_handler();
+        hand_action_useful = hand_return_action_usefel();
+        if (hand_action_useful == 1) {
+            hand_feature_signal = hand_return_cur_action();
+            lv_event_send_refresh(lv_ui.show_label);
+        }
+        // count_for_hand++;
+    }
+    if (scr_palm == true) {
+        scr_on_count++;
+    }
+    if (scr_on_count == 5000) {
+        scr_palm = false;
+        lv_scr_load(lv_ui.scenes);
+        scr_on_count = 0;
+    }
 
     button_loop();
 }
-
-

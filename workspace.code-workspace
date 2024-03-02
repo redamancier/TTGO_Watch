@@ -16,7 +16,8 @@
             "functional": "c",
             "i2cdev.h": "c",
             "wire.h": "c",
-            "i2c.h": "c"
+            "i2c.h": "c",
+            "random": "cpp"
         }
     }
 }
